@@ -1,7 +1,9 @@
 package com.example.sensorgame
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -17,6 +19,15 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import android.location.Location
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.Priority
+import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
+import com.google.android.gms.location.LocationRequest
 import kotlin.math.sqrt
 
 @SuppressLint("SetTextI18n", "ClickableViewAccessibility")
@@ -67,12 +78,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
     )
     private val stars = mutableListOf<View>()
     private var starPx = 0
+
+    // GPS/Location
+    private lateinit var fusedLocation: FusedLocationProviderClient
+    private var lastLocation: Location? = null
+    private lateinit var locationCallback: LocationCallback
+
     companion object {   // Step 2
         private const val BASE_SPEED = 5f
         private const val SHAKE_THRESHOLD = 12f
         private const val SHAKE_COOLDOWN_MS = 1500L
         private const val STAR_COUNT = 5
-
+        private const val REWARD_DISTANCE_M = 10f // Meters moved before reward triggers
+        private const val LOCATION_PERM_CODE = 100
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,6 +101,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
         tvGps    = findViewById(R.id.tvGps)
         tvScore  = findViewById(R.id.tvScore)
         initSensors()          // Step 3: new line
+        setupLocation()
         setupTestControls()
         gameArea.post { startGame() }   // Step 3: was initBall()
     }
@@ -99,6 +118,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
         super.onPause()
         sensorManager.unregisterListener(this)
         loopRunnable?.let { handler.removeCallbacks(it) }
+        // This stop the location tracking when you're not using the app
+        // This helps to save battery
+        if (::fusedLocation.isInitialized) fusedLocation.removeLocationUpdates { locationCallback }
     }
 
     override fun onDestroy() {   // Step 4
@@ -187,6 +209,84 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
         }
     }
 
+    // GPS/Location
+    private fun setupLocation(){
+        fusedLocation = LocationServices.getFusedLocationProviderClient(this)
+        locationCallback = object: LocationCallback(){
+            override fun onLocationResult(result: LocationResult) {
+                result.lastLocation?.let { onNewLocation(it) }
+            }
+        }
+
+        if (hasLocationPermission()){
+            startLocationUpdates()
+        } else {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                LOCATION_PERM_CODE
+            )
+        }
+    }
+
+    private fun hasLocationPermission() =
+        ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == LOCATION_PERM_CODE &&
+            grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+        ) {
+            startLocationUpdates()
+        } else {
+            tvGps.text = "GPS permission denied!"
+        }
+    }
+
+    // Location Requests
+    private fun startLocationUpdates(){
+        if(!hasLocationPermission()) return
+
+        val request = LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY, 2000L
+        )
+            .setMinUpdateIntervalMillis(1000L)
+            .build()
+        try {
+            fusedLocation.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            tvGps.text = "Location Unavailable"
+        }
+    }
+
+    // NEW LOCATION ASSIGNMENT
+    private fun onNewLocation(location: Location){
+        // Assignment 3 requires: display current coordinates on screen
+        if (lastLocation == null){
+            lastLocation = location
+            return
+        }
+
+        val distance = lastLocation!!.distanceTo(location)
+
+        if (distance >= REWARD_DISTANCE_M){
+            Toast.makeText(this, "Movement Reward! +10m", Toast.LENGTH_SHORT).show()
+            lastLocation = location
+        }
+
+        tvGps.text = "Lat: ${"%.5f".format(location.latitude)}," +
+                    "Long: ${"%.5f".format(location.longitude)}"
+
+    }
+
     private fun spawnStars(areaW:Int, areaH:Int) {
         stars.forEach{ gameArea.removeView(it) }
         stars.clear()
@@ -241,7 +341,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
             }
             true
         }
-        findViewById<Button>(R.id.btnShake).isEnabled = false
-        findViewById<Button>(R.id.btnGps).isEnabled = false
+        // Button for shake function
+        findViewById<Button>(R.id.btnShake).setOnClickListener { onShakeDetected() }
+
+        // Button for GPS function
+        val btnGps = findViewById<Button>(R.id.btnGps)
+        btnGps.setOnClickListener {
+            btnGps.isEnabled = false
+            val base = Location("test").apply {
+                latitude = 34.0522
+                longitude = -118.2437
+            }
+            val current = Location("test").apply {
+                latitude = 34.0523
+                longitude = -118.2437
+            }
+            lastLocation = base
+            onNewLocation(current)
+            handler.postDelayed({btnGps.isEnabled=true},5000L)
+        }
     }
 }
