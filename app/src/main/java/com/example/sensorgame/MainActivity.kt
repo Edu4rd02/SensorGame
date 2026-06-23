@@ -29,6 +29,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.LocationRequest
 import kotlin.math.sqrt
+import androidx.appcompat.app.AlertDialog
+import android.content.DialogInterface
 
 @SuppressLint("SetTextI18n", "ClickableViewAccessibility")
 
@@ -84,6 +86,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
     private var lastLocation: Location? = null
     private lateinit var locationCallback: LocationCallback
 
+    private var score = 0
+    private var gameOver = false
+
     companion object {   // Step 2
         private const val BASE_SPEED = 5f
         private const val SHAKE_THRESHOLD = 12f
@@ -91,6 +96,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
         private const val STAR_COUNT = 5
         private const val REWARD_DISTANCE_M = 10f // Meters moved before reward triggers
         private const val LOCATION_PERM_CODE = 100
+        private const val WIN_SCORE = 50
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -149,7 +155,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
         ball.translationX = ballX
         ball.translationY = ballY
         applyBallColor()
-        tvScore.text = "Score: 0"
+        score = 0
+        gameOver = false
+        tvScore.text = "Score: $score"
         spawnStars(w,h)
         loopRunnable?.let { handler.removeCallbacks(it) }
         loopRunnable = object : Runnable {
@@ -160,6 +168,44 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
         }
 
         handler.post(loopRunnable!!)
+    }
+
+    private fun addScore(points: Int){
+        score += points
+        tvScore.text = "Score: $score"
+        checkWin()
+    }
+
+    private fun restartGame(){
+        score = 0
+        gameOver = false
+        colorIndex = 0
+        gyroX = 0f
+        gyroY = 0f
+        tvScore.text = "Score: 0"
+        startGame()
+    }
+
+    // Final report
+    private fun checkWin(){
+        // Guard 1: already won - do nothing
+        if ((gameOver) || (score<WIN_SCORE)) return
+
+        gameOver = true
+
+        loopRunnable?.let { handler.removeCallbacks(it) }
+
+        val builder = AlertDialog.Builder(this)
+            builder
+                .setTitle("CONGRATULATIONS!")
+                .setMessage("Final score: $score")
+                .setPositiveButton("Play again"){ _, _ ->
+                    restartGame()
+                }
+                .setNegativeButton("Exit"){ _, _ ->
+                    finish()
+                }
+                .show()
     }
 
     private fun moveBallWithGyro() {   // Step 7 stub
@@ -200,6 +246,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
         colorIndex = if (colorIndex < 3) colorIndex+1 else 0
         applyBallColor()
         Toast.makeText(this,"Shake detected!",Toast.LENGTH_SHORT).show()
+        addScore(2)
     }
 
     private fun applyBallColor() {
@@ -285,6 +332,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
         tvGps.text = "Lat: ${"%.5f".format(location.latitude)}," +
                     "Long: ${"%.5f".format(location.longitude)}"
 
+        addScore(5)
+
     }
 
     private fun spawnStars(areaW:Int, areaH:Int) {
@@ -324,6 +373,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {   // Step 1
             stars.remove(star)
 
             Toast.makeText(this, "Star collected!", Toast.LENGTH_LONG).show()
+            addScore(10)
         }
 
         if (stars.isEmpty()) spawnStars(gameArea.width, gameArea.height)
